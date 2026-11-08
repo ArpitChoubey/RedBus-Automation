@@ -1,0 +1,112 @@
+# RedBus Automation
+
+A Selenium WebDriver script, written in Java, that automates a bus search on [redbus.in](https://www.redbus.in). It searches for buses from **Mumbai** to **Pune**, applies the **Primo** and **Evening** filters, scrolls through the lazily loaded results until the whole list has loaded, and prints the name of every operator along with the total count.
+
+## What the script does
+
+1. Opens redbus.in in a maximized Chrome window.
+2. Opens the source/destination picker and types the "From" city (Mumbai), then picks the exact match from the suggestion list.
+3. Does the same for the "To" city (Pune).
+4. Clicks **Search Buses**.
+5. Applies the **Primo** filter, then the **Evening** departure-time filter.
+6. Waits for the results header to refresh and prints it (e.g. "*N buses*").
+7. Keeps scrolling the results until the page shows **"End of list"**, so every lazily loaded bus is on the page.
+8. Prints each bus operator's name and the total number of buses found.
+
+## Tech stack
+
+| Tool | Purpose |
+|------|---------|
+| Java | Language |
+| Selenium WebDriver 4.44.0 (`selenium-java`) | Browser automation |
+| Maven | Dependency management and build |
+| Google Chrome + ChromeDriver | Browser under test |
+
+ChromeDriver is not bundled. Selenium 4's built-in **Selenium Manager** downloads the driver that matches your installed Chrome on the first run, so no manual driver setup is needed.
+
+## Project structure
+
+```
+RedBus-Automation/
+├── pom.xml                                   # Maven config (Selenium dependency)
+└── src/main/java/com/redbus/
+    ├── RedBusApplicationAutomation.java      # The automation script (main method)
+    └── package-info.java
+```
+
+## Prerequisites
+
+- JDK 11 or later (Selenium 4 needs Java 11+)
+- Maven 3.x
+- Google Chrome installed
+- An internet connection (the script runs against the live redbus.in site)
+
+## How to run
+
+**From an IDE (Eclipse / IntelliJ):**
+1. Import the project as an existing Maven project.
+2. Let Maven download the dependencies.
+3. Open `RedBusApplicationAutomation.java` and run it as a Java application.
+
+**From the command line:**
+```bash
+git clone https://github.com/ArpitChoubey/RedBus-Automation.git
+cd RedBus-Automation
+mvn compile exec:java -Dexec.mainClass="com.redbus.RedBusApplicationAutomation"
+```
+
+To search a different route, change the city names passed to `selectLocation(...)` in `main()`.
+
+## Sample output
+
+```
+<suggestion counts printed while selecting cities>
+12 buses
+Bus Operator A
+Bus Operator B
+...
+Total Number of Buses Loaded with Primo and Evening Filter12
+```
+*(The operator names and counts depend on what's live on redbus.in when you run it.)*
+
+## Challenges faced and how they were solved
+
+### 1. Dynamic, auto-generated class names
+RedBus is a modern React site, and its CSS class names carry generated suffixes (something like `srcDestWrapper___1a2b3`) that can change between deployments. Exact-match locators broke easily.
+**Solution:** every locator uses XPath `contains(@class, "...")` on the stable part of the class name, e.g. `//div[contains(@class,"srcDestWrapper") and @role="button"]`. Where classes weren't reliable, text was used instead (`//div[contains(text(),"Primo")]`).
+
+### 2. Finding the city input field
+The "From"/"To" text box only appears after the source/destination wrapper is clicked, and it has no stable ID or name to locate it by.
+**Solution:** after clicking, the page puts focus on the input, so the script grabs it with `driver.switchTo().activeElement()` instead of searching for a locator.
+
+### 3. Picking the right city from the suggestions
+Typing "Mumbai" returns several groups of suggestions (cities, bus stops, areas), and they load asynchronously. Clicking the first item would often pick the wrong place, or fail because the list hadn't finished loading.
+**Solution:** the script waits with `numberOfElementsToBeMoreThan(searchCategory, 2)` until the suggestion groups have rendered, then takes only the first group (cities), and clicks the entry whose text matches the city name exactly (`equalsIgnoreCase`).
+
+### 4. Lazy loading of search results
+The results page doesn't render all buses at once; more rows load as you scroll. Counting rows right away gave a number far below the real total.
+**Solution:** a loop scrolls the third-last row into view with `JavascriptExecutor` (`scrollIntoView({behavior:'smooth'})`). That triggers the next batch, and the loop re-reads the row list on each pass. It stops when the **"End of list"** marker shows up, then collects the final list.
+
+### 5. Results going stale after filters are applied
+After clicking **Primo** and **Evening**, the page re-renders the results. Reading the list too early returned the old, unfiltered rows, or threw `StaleElementReferenceException`.
+**Solution:** the script waits for the results subtitle to contain the text "buses" (`textToBePresentInElementLocated`) before reading anything. It also locates the row list again on every loop pass instead of reusing old references.
+
+### 6. Timing and flakiness
+Fixed `Thread.sleep()` calls were either too slow or not long enough, depending on network speed.
+**Solution:** every interaction goes through a `WebDriverWait` (30 seconds) with the right `ExpectedConditions` (`visibilityOfElementLocated`, `elementToBeClickable`, `visibilityOfAllElementsLocatedBy`), so the script moves on as soon as the page is ready.
+
+### 7. Reading data inside each result row
+A page-wide XPath for the operator name would return every name on the page, not the one inside the current row.
+**Solution:** a relative XPath (`.//div[contains(@class,"travelsName")]`) is run with `row.findElement(...)`, so each lookup is scoped to its own `tupleWrapper` row.
+
+## Known limitations and possible improvements
+
+- The browser isn't closed at the end; adding `driver.quit()` (ideally in a `finally` block) would clean up the session.
+- The route and filters are hard-coded; they could come from a config file or command-line arguments.
+- The scroll loop has no upper bound. If redbus.in ever stops showing "End of list", it would run until a wait timed out, so a max-iteration guard would make it safer.
+- Moving to the **Page Object Model** with **TestNG/JUnit** assertions and reporting (e.g. ExtentReports) would turn the script into a maintainable test suite.
+- The locators depend on redbus.in's current UI and may need updating when the site changes.
+
+## Author
+
+**Arpit Choubey** — [GitHub](https://github.com/ArpitChoubey)
